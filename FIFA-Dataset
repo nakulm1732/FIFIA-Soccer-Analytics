@@ -1,0 +1,590 @@
+library("readxl")
+library(data.table)
+library(ggplot2)
+library(recommenderlab)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(DT)
+library(knitr)
+library(grid)
+library(gridExtra)
+library(corrplot)
+library(qgraph)
+library(methods)
+library(Matrix)
+library(ggthemes)
+FIFA_Data=read_excel("FIFA_Data.xlsx")
+fifa <- read.csv("complete.csv")
+```
+```{r}
+#Histogram of Players Height (in cms)
+p<-ggplot(FIFA_Data, aes(x=height_cm, fill=factor(height_cm), color=factor(height_cm))) +
+  geom_histogram(position="identity", alpha=0.5,binwidth=1)+ labs(title="Histogram of Players Height (in cms)")
+# Add mean lines
+p+geom_vline(data=FIFA_Data, aes(xintercept=mean(height_cm)),linetype="dashed")
+summary(FIFA_Data$height_cm)
+```
+
+```{r}
+#Histogram of Players Weight (in kgs)
+p=FIFA_Data %>% ggplot(aes(x = weight_kg, fill = factor(weight_kg))) + geom_bar(color = "black") + guides(fill = FALSE)+ labs(title="Histogram of Players Weight (in kgs)")
+# Add mean lines
+p+geom_vline(data=FIFA_Data, aes(xintercept=mean(weight_kg)),linetype="dashed")
+summary(FIFA_Data$weight_kg)
+```
+```{r}
+#Top 15 countries with maximum players
+total=count(FIFA_Data,nationality,sort=TRUE)
+top15=head(total,15)
+top15
+```
+```{r}
+library("ggmap")
+library(maptools)
+library(maps)
+WorldData <- map_data('world')
+WorldData %>% filter(region != "Antarctica") -> WorldData
+WorldData <- fortify(WorldData)
+df <- data.frame(region=top15$nationality, 
+                 value=top15$n, 
+                 stringsAsFactors=FALSE)
+p <- ggplot()
+p <- p + geom_map(data=WorldData, map=WorldData,
+                  aes(x=long, y=lat, group=group, map_id=region),
+                  fill="white", colour="#7f7f7f", size=0.5)
+p <- p + geom_map(data=df, map=WorldData,
+                  aes(fill=value, map_id=region),
+                  colour="#7f7f7f", size=0.5)
+p <- p + coord_map("rectangular", lat0=0, xlim=c(-150,150), ylim=c(-60, 90))
+p <- p + scale_fill_continuous(low="thistle2", high="darkred", 
+                               guide="colorbar")
+p <- p + scale_y_continuous(breaks=c())
+p <- p + scale_x_continuous(breaks=c())
+p <- p + labs(title="Top 15 countries with maximum players")
+p <- p + theme_bw()
+p <- p + theme(panel.border = element_blank())
+p 
+```
+```{r}
+#Top 10 players overall
+newdata = fifa[order(-fifa$overall),]
+z=head(newdata,10)
+z[,c(2,4,15,17,20)]
+```
+```{r}
+#Player value against different attributes
+library(tree)
+tree.fit <- tree(eur_value/100000~potential+pac+sho+pas+phy+dri+def, data=FIFA_Data)
+summary(tree.fit)
+plot(tree.fit)
+text(tree.fit)
+```
+```{r}
+#Top countries with best stamina ratings
+stamina_desc100 <- head(arrange(FIFA_Data, desc(stamina)), n=100)
+stamina_list <- stamina_desc100 %>% group_by(nationality)  %>% summarise(n = n()) %>% arrange(desc(n))
+stamina_list
+```
+```{r}
+ggplot(stamina_list, aes(x = reorder(nationality, n), y =  n )) +
+  geom_bar(stat='identity',colour="white", fill = c("blue")) +
+  geom_text(aes(x = nationality, y = 1, label = paste0("(",n,")",sep="")),
+            hjust=0, vjust=.5, size = 3, colour = 'black',
+            fontface = 'bold') +
+  labs(x = 'Nationality', y = 'Count', title = 'Top countries with best stamina ratings') +
+  coord_flip() + 
+  theme_bw()
+```
+```{r}
+library(radarchart)
+library(tidyr)
+#Selecting top players by rating from data
+radarDF <- head(z,5) %>% select("name","long_passing","sprint_speed", "aggression","balance","interceptions" ) %>% as.data.frame()
+radarDF <- gather(radarDF, key=Label, value=Score, -name) %>%
+  spread(key=name, value=Score)
+chartJSRadar(scores = radarDF, maxScale = 100, showToolTipLabel = TRUE)
+#1) Value and other factors
+fifadata <- read.csv(file.choose())
+FIFA_Data <- fifadata
+sum(is.na(FIFA_Data))
+FIFA_Data[is.na(FIFA_Data)] <- 0
+sum(is.na(FIFA_Data))
+dim(FIFA_Data)
+head(FIFA_Data)
+#2) Split Test and Train
+library(caTools)
+sdd <- FIFA_Data[1:90]
+sdd
+ads <- sdd[-1:-5]
+sso <- ads[-2:-3]
+FIFA2 <- sso[-4:-6]
+dim(FIFA2)
+head(FIFA2[1:49])
+FIFA2$work_rate_att <- factor(FIFA2$work_rate_att, levels = c("High","Medium","Low"),labels = c(3,2,1))
+FIFA2$work_rate_def <- factor(FIFA2$work_rate_def, levels = c("High","Medium","Low"),labels = c(3,2,1))
+FIFA2$preferred_foot <- factor(FIFA2$preferred_foot, levels = c("Left","Right"),labels = c(1,2))
+FIFA3 <- FIFA2[1:49]
+head(FIFA3)
+dim(FIFA3)/2
+set.seed(123)
+train = sample(1:dim(FIFA3)[1], dim(FIFA3)[1] / 2) 
+traind <- FIFA3[train, ]
+testsd <- FIFA3[-train, ] 
+dim(traind)
+dim(testsd)
+#3) Linear Regression to identify the most valuable players
+vall2 <- lm(eur_value~., data = traind )
+summary(vall2)
+predd <- predict(vall2, data = testsd)
+mean(sqrt((predd - testsd$eur_value)^2))
+# As per Linear Regression, age, eur_release_cause, overall, eur_wage, potential,international reputaion, skill moves, weak foot, volleys, freekick accuracy, and reactions are significant parameters
+vall <- lm(eur_value~age+overall+eur_wage+potential+international_reputation+skill_moves+weak_foot+volleys+free_kick_accuracy+reactions+stamina+weight_kg+phy+work_rate_att, data = traind )
+summary(vall)
+predd <- predict(vall, data = testsd)
+mean(sqrt((predd - testsd$eur_value)^2))
+#Linear Regression using only the most significant parameters
+vall4 <- lm(eur_value~age+overall+eur_wage+potential+international_reputation+reactions, data = traind )
+summary(vall4)
+predd2 <- predict(vall4, data = testsd)
+mean(sqrt((predd2 - testsd$eur_value)^2))
+#Best Subset Selection using Forward Stepwise
+library(leaps) 
+modelfit <- regsubsets(eur_value~., data = traind, nvmax = 20, method = 'forward')
+dfg <- summary(modelfit)
+dfg
+par(mfrow = c(2,2))
+plot(dfg$rss, xlab = "Predictors", ylab = "RSS", type = "l") 
+plot(dfg$adjr2, xlab = "Predictors", ylab = "AdjustedRsquared", type = "l") 
+adjr <- which.max(dfg$adjr2) 
+adjr 
+points(adjr, dfg$adjr2[adjr], col = "red", cex = 2, pch = 20)
+plot(dfg$cp,xlab = "Predictors", ylab = "Cp", type = "l")
+Cp <- which.min(dfg$cp) 
+Cp 
+points(Cp, dfg$cp[Cp], col = "red", cex = 2, pch = 20)
+plot(dfg$bic, xlab = "Predictors", ylab = "bic", type = "l") 
+Bic <- which.min(dfg$bic) 
+Bic 
+points(which.min(dfg$bic), dfg$bic[which.min(dfg$bic)], col = "red", cex = 2, pch = 20) 
+coef(modelfit,min(Bic,Cp,adjr))
+# As per forward stepwise age, eur_wage, eur_release_cause, overall, potential, dri, def, international reputation, skill moves, weak foot, heading accuracy and reactions are the significant predictors
+#Best Subset Selection using Backward Stepwise
+modelfit <- regsubsets(eur_value~., data = traind, nvmax = 20, method = 'backward')
+dfg <- summary(modelfit)
+dfg
+par(mfrow = c(2,2))
+plot(dfg$rss, xlab = "Predictors", ylab = "RSS", type = "l") 
+plot(dfg$adjr2, xlab = "Predictors", ylab = "AdjustedRsquared", type = "l") 
+adjr <- which.max(dfg$adjr2) 
+adjr 
+points(adjr, dfg$adjr2[adjr], col = "red", cex = 2, pch = 20)
+plot(dfg$cp,xlab = "Predictors", ylab = "Cp", type = "l")
+Cp <- which.min(dfg$cp) 
+Cp 
+points(Cp, dfg$cp[Cp], col = "red", cex = 2, pch = 20)
+plot(dfg$bic, xlab = "Predictors", ylab = "bic", type = "l") 
+Bic <- which.min(dfg$bic) 
+Bic 
+points(which.min(dfg$bic), dfg$bic[which.min(dfg$bic)], col = "red", cex = 2, pch = 20) 
+coef(modelfit,min(Bic,Cp,adjr))
+# As per backward stepwise age, eur_wage, eur_release_cause, overall, potential, dri, international reputation, skill moves, reactions, and standing tackles are the significant predictors
+#Ridge and Lasso
+train.mat <- model.matrix(eur_value ~ ., data = traind) 
+dim(traind)
+dim(testsd)
+test.mat <- model.matrix(eur_value ~ ., data = testsd) 
+grid <- 10 ^ seq(10, -2, length = 100) 
+library(glmnet)
+length(train.mat)
+length(test.mat)
+fit.ridge <- glmnet(train.mat, traind$eur_value, alpha = 0, lambda = grid) 
+plot(fit.ridge)
+cv.ridge <- cv.glmnet(train.mat, traind$eur_value, alpha = 0, lambda = grid ) 
+plot(cv.ridge)
+bestlam.ridge <- cv.ridge$lambda.min
+bestlam.ridge 
+pred3 <- predict(fit.ridge, s = bestlam.ridge, newx = test.mat) 
+length(pred3)
+mean((pred3 - testsd$eur_value)^2)  
+coef(cv.ridge)
+fit.lasso <- glmnet(train.mat, traind$eur_value, alpha = 1, lambda = grid) 
+plot(fit.lasso) 
+cv.lasso <- cv.glmnet(train.mat, traind$eur_value , alpha = 1, lambda = grid )
+plot(cv.lasso) 
+summary(cv.lasso)
+bestlam.lasso <- cv.lasso$lambda.min
+bestlam.lasso
+pred4 <- predict(fit.lasso, s = bestlam.lasso, newx = test.mat) 
+mean(sqrt((pred4 - testsd$eur_value)^2))
+coef(fit.lasso)
+Lasso provides greater accuracy of prediction than Ridge 
+#Polynomial Regression
+# As per Linear Regression, age, eur_release_cause, overall, eur_wage, potential,international reputaion, skill moves, weak foot, volleys, freekick accuracy, and reactions are significant parameters
+vall3 <- lm(eur_value~poly(age,4)+poly(overall,4)+poly(eur_wage,4)+poly(potential,4)+poly(reactions,4)+poly(eur_release_clause,4)+poly(international_reputation,4)+poly(skill_moves,4)+poly(free_kick_accuracy,4)+poly(volleys,4)+poly(weak_foot,4), data = traind)
+summary(vall3)
+coef(summary(vall3))
+predd <- predict(vall3, data = testsd)
+mean(sqrt((predd - testsd$eur_value)^2))
+# As per forward stepwise age, eur_wage, eur_release_cause, overall, potential, dri, def, international reputation, skill moves, weak foot, heading accuracy and reactions are the significant predictors
+vall4 <- lm(eur_value~poly(age,4)+poly(overall,4)+poly(eur_wage,4)+poly(potential,4)+poly(reactions,4)+poly(eur_release_clause,4)+poly(international_reputation,4)+poly(skill_moves,4)+poly(heading_accuracy,4)+poly(volleys,4)+poly(weak_foot,4)+poly(dri,4)+poly(def,4), data = traind)
+summary(vall4)
+predd <- predict(vall4, data = testsd)
+mean(sqrt((predd - testsd$eur_value)^2))
+#SVM
+library(e1071)
+vall <- svm(eur_value~age+overall+eur_wage+potential+international_reputation+skill_moves+weak_foot+volleys+free_kick_accuracy+reactions+stamina+weight_kg+phy+work_rate_att, data = traind, kernel = "polynomial", degree = c(3,4,5), type = 'eps-regression')
+summary(vall)
+predd <- predict(vall, data = testsd)
+mean(sqrt((predd - testsd$eur_value)^2))
+vall4 <- svm(eur_value~age+overall+eur_wage+potential+international_reputation+reactions, data = traind, kernel = "polynomial", degree = c(3,4,5), type = 'eps-regression')
+predd <- predict(vall4, data = testsd)
+mean(sqrt((predd - testsd$eur_value)^2))
+#Support Vector Regression gives the least error and hence is a method to use.
+#Euro value
+#Relation between value and age
+fifadata <- read.csv(file.choose())
+FIFA_Data <- fifadata
+library(ggplot2)
+ggplot(data = FIFA_Data, aes(x=age, y = eur_value))+
+  geom_point(aes(x=age, y = eur_value),colour = "red")+
+  geom_smooth(method = 'gam', formula = y~s(x,bs = "cs"))+
+  ggtitle("Value and Age")+
+  xlab('age')+ylab('Value')
+#Relationship between value and overall
+ggplot(data = FIFA_Data, aes(x=overall, y = eur_value))+
+  geom_point(aes(x=overall, y = eur_value),colour = "red")+
+  geom_smooth(method = 'gam', formula = y~s(x,bs = "cs"))+
+  xlab('overall')+ylab('Value')
+#Relationship between value and potential
+ggplot(data = FIFA_Data, aes(x=potential, y = eur_value))+
+  geom_point(aes(x=potential, y = eur_value),colour = "red")+
+  geom_smooth(method = 'gam', formula = y~s(x,bs = "cs"))+
+  xlab('potential')+ylab('Value')
+#Relationship between value and international reputation
+ggplot(data = FIFA_Data, aes(x=international_reputation, y = eur_value))+
+  geom_point(aes(x=international_reputation, y = eur_value),colour = "red")+
+  geom_smooth(method = 'lm')+
+  xlab('reputation')+ylab('Value')
+#Relationship between release cause and potential
+ggplot(data = FIFA_Data, aes(eur_release_clause, y = eur_value))+
+  geom_point(aes(x=eur_release_clause, y = eur_value),colour = "red")+
+  geom_smooth(method = )+
+  xlab('release cause')+ylab('Value')
+#1) Most Valuable Players
+value <- rank(FIFA_Data$eur_value)
+value[1:10]
+newd <- FIFA_Data[order(-FIFA_Data$eur_value),]
+cjs <- head(newd[,1:20],10)
+dfbb <- data.frame(cjs$name,cjs$eur_value)
+dfbb
+ggplot(data = cjs, aes(x=cjs$name, y=cjs$eur_value))+geom_bar(stat="identity", aes(fill=club))+xbar('Valuable Players')+ylab('Value')
+#Most Valuable Goalkeepers
+abcd <- subset(FIFA_Data, FIFA_Data$gk > 1)
+newd23 <- abcd[order(-abcd$eur_value),]
+goalies <- head(newd23[1:30,],7)
+goo <- data.frame(goalies$name,goalies$eur_value)
+ggplot(data = goalies, aes(x=goalies$name, y=goalies$eur_value))+geom_bar(stat="identity", aes(fill=club))+xbar("Goalkeepers")+ylab('Value')
+goalies$name[1]
+VA <- c(" ________________________________________________________________ ")  
+VB <- c("|           |      |____Home Goalpost____|       |               |")
+VC <- c("|           |                DeGEA               |               |")
+VD <- c("|           |                                    |               |")
+#Most Valuable Defenders
+library(ggplot2)
+newd2 <- FIFA_Data[order(-FIFA_Data$def),]
+cjs2 <- head(newd2[,1:20],5)
+dfbb2 <- data.frame(cjs$name,cjs$eur_value)
+dfbb2
+ggplot(data = cjs2, aes(x=cjs2$name, y=cjs2$eur_value))+geom_bar(stat="identity", aes(fill=club))+xlab('Defenders')+ylab('Value')
+#Most Valuable LB
+library(ggplot2)
+newd3 <- FIFA_Data[order(-FIFA_Data$lb),]
+cjs3 <- head(newd3[,1:20],10)
+cjs3$name[1:5]
+dfbb3 <- data.frame(cjs3$name,cjs3$eur_value)
+dfbb3
+ggplot(data = cjs3, aes(x=cjs3$name, y=cjs3$eur_value))+geom_bar(stat="identity", aes(fill=club))+xlab('LB')+ylab('Value')
+#Most Valuable RB
+library(ggplot2)
+newd4 <- FIFA_Data[order(-FIFA_Data$lb),]
+cjs4 <- head(newd4[,1:20],8)
+cjs4$name[1:5]
+dfbb3 <- data.frame(cjs4$name,cjs4$eur_value)
+dfbb3
+ggplot(data = cjs4, aes(x=cjs4$name, y=cjs4$eur_value))+geom_bar(stat="identity", aes(fill=club))+xlab('RB')+ylab("Value")
+VE <- c("|           |____________________________________|               |")
+VF <- c("|          Ramos             Hummels            Boateng          |")
+VG <- c("|                                                                |")
+VH <- c("|                                                                |")
+VI <- c("|R.Nainggolan                                            D.Alaba |")
+VZ <- c("|                                                                |")
+#Most valuable Midfielders 
+library(ggplot2)
+newd5 <- FIFA_Data[order(-FIFA_Data$cm),]
+cjs5 <- head(newd5[,1:20],8)
+cjs5$name[1:7]
+dfbb3 <- data.frame(cjs5$name,cjs5$eur_value)
+dfbb3
+ggplot(data = cjs5, aes(x=cjs5$name, y=cjs5$eur_value))+geom_bar(stat="identity", aes(fill=club))+xlab('Midfielders')+ylab('Value')
+#Most valuable Defensive  Midfielders 
+library(ggplot2)
+newd6 <- FIFA_Data[order(-FIFA_Data$cdm),]
+cjs6 <- head(newd6[,1:20],3)
+dfbb4 <- data.frame(cjs6$name,cjs6$eur_value)
+ggplot(data = cjs6, aes(x=cjs6$name, y=cjs6$eur_value))+geom_bar(stat="identity", aes(fill=club))+xlab('Def Midfielders')+ylab('Value')
+
+VJ <- c("|----------------------------------------------------------------|")
+VK <- c("|                          M.Verrati                             |")
+VL <- c("|                                                                |")
+VM <- c("|           K.De Bruyne                  T.Kroos                 |")
+VN <- c("|                                                                |")
+#Most valuable Strikers
+newd7 <- FIFA_Data[order(-FIFA_Data$st),]
+cjs7 <- head(newd7,8)
+cjs7$name[1:7]
+dfbb5 <- data.frame(cjs7$name,cjs7$eur_value)
+dfbb5
+ggplot(data = cjs7, aes(x=cjs7$name, y=cjs7$eur_value))+geom_bar(stat="identity", aes(fill=club))+xlab('Strikers')+ylab('Value')
+VO <- c("|                          Messi                                 |")
+VP <- c("|          Saurez                         Ronaldo                |")
+VQ <- c("|             _____________________________________              |")
+VR <- c("|            |                                     |             |")
+VS <- c("|            |                                     |             |")
+VT <- c("|            |                                     |             |")
+VU <- c("|____________|_______|____Away Goalpost____|_______|_____________|")
+Valuable_team <- matrix(c(VA,VB,VC,VD,VE,VF,VG,VH,VI,VZ,VJ,VK,VL,VM,VN,VO,VP,VQ,VR,VS,VT,VU), ncol = 1)
+data.frame(Valuable_team)
+#1) What factors influence Overall Score
+fifadata <- read.csv(file.choose())
+sum(is.na(FIFA_Data))
+FIFA_Data[is.na(FIFA_Data)] <- 0
+sum(is.na(FIFA_Data))
+dim(FIFA_Data)
+head(FIFA_Data)
+#Split Test and Train
+library(caTools)
+sdd <- FIFA_Data[1:90]
+sdd
+ads <- sdd[-1:-5]
+sso <- ads[-2:-3]
+FIFA2 <- sso[-4:-6]
+dim(FIFA2)
+head(FIFA2[1:49])
+FIFA2$work_rate_att <- factor(FIFA2$work_rate_att, levels = c("High","Medium","Low"),labels = c(3,2,1))
+FIFA2$work_rate_def <- factor(FIFA2$work_rate_def, levels = c("High","Medium","Low"),labels = c(3,2,1))
+FIFA2$preferred_foot <- factor(FIFA2$preferred_foot, levels = c("Left","Right"),labels = c(1,2))
+FIFA3 <- FIFA2[1:49]
+head(FIFA3)
+set.seed(123)
+train = sample(1:dim(FIFA3)[1], dim(FIFA3)[1] / 2) 
+traind <- FIFA3[train, ]
+testsd <- FIFA3[-train, ] 
+dim(traind)
+dim(testsd)
+#Linear Regression
+vall2 <- lm(overall~., data = traind )
+summary(vall2)
+predd <- predict(vall2, data = testsd)
+mean(sqrt((predd - testsd$overall)^2))
+# As per Linear Regression, age, weight_kg, eur_value, eur_release_cause, potential,pac, dri, phy, international reputaion, skill moves, work_rate_att1, work_rate_def1, heading_accuracy, short passing, dribbling, long passing, balance, positioning, vision,  agility, sliding tackle are significant parameters
+
+#LInear Regression using significant predictors only
+vall <- lm(overall~age+weight_kg+eur_value+eur_release_clause+potential+pac+dri+phy+international_reputation+skill_moves+work_rate_att+work_rate_def+heading_accuracy+dribbling+short_passing+long_passing+balance+positioning+vision+agility+sliding_tackle, data = traind )
+summary(vall)
+predd <- predict(vall, data = testsd)
+mean(sqrt((predd - testsd$overall)^2))
+# As per Linear Regression using the most significant predictors, age, weight_kg,FIFA3 eur_release_cause, overall, eur_wage, phy, potential,international reputaion, skill moves, freekick accuracy, and stamina are significant parameters
+#Best Subset Selection using Forward Stepwise
+library(leaps) 
+modelfit <- regsubsets(overall~., data = traind, nvmax = 20, method = 'forward')
+dfg <- summary(modelfit)
+dfg
+par(mfrow = c(2,2))
+plot(dfg$rss, xlab = "Predictors", ylab = "RSS", type = "l") 
+plot(dfg$adjr2, xlab = "Predictors", ylab = "AdjustedRsquared", type = "l") 
+adjr <- which.max(dfg$adjr2) 
+adjr 
+points(adjr, dfg$adjr2[adjr], col = "red", cex = 2, pch = 20)
+plot(dfg$cp,xlab = "Predictors", ylab = "Cp", type = "l")
+Cp <- which.min(dfg$cp) 
+Cp 
+points(Cp, dfg$cp[Cp], col = "red", cex = 2, pch = 20)
+plot(dfg$bic, xlab = "Predictors", ylab = "bic", type = "l") 
+Bic <- which.min(dfg$bic) 
+Bic 
+points(which.min(dfg$bic), dfg$bic[which.min(dfg$bic)], col = "red", cex = 2, pch = 20) 
+coef(modelfit,min(Bic,Cp,adjr))
+# As per forward stepwise age, eur_value, potential, pac, pas, dri, phy,  international reputation, skill moves,reactions, aggression, positioning, vision, composure and marking are the significant predictors
+#Best Subset Selection using Backward Stepwise
+modelfit <- regsubsets(overall~., data = traind, nvmax = 20, method = 'backward')
+dfg <- summary(modelfit)
+dfg
+par(mfrow = c(2,2))
+plot(dfg$rss, xlab = "Predictors", ylab = "RSS", type = "l") 
+plot(dfg$adjr2, xlab = "Predictors", ylab = "AdjustedRsquared", type = "l") 
+adjr <- which.max(dfg$adjr2) 
+adjr 
+points(adjr, dfg$adjr2[adjr], col = "red", cex = 2, pch = 20)
+plot(dfg$cp,xlab = "Predictors", ylab = "Cp", type = "l")
+Cp <- which.min(dfg$cp) 
+Cp 
+points(Cp, dfg$cp[Cp], col = "red", cex = 2, pch = 20)
+plot(dfg$bic, xlab = "Predictors", ylab = "bic", type = "l") 
+Bic <- which.min(dfg$bic) 
+Bic 
+points(which.min(dfg$bic), dfg$bic[which.min(dfg$bic)], col = "red", cex = 2, pch = 20) 
+coef(modelfit,min(Bic,Cp,adjr))
+# As per backward stepwise age, eur_value, potential, pac, work_rate_att, work_rate_def pas, dri, phy,  international reputation, skill moves,reactions, aggression, positioning, vision, composure and marking are the significant predictors
+#Ridge and Lasso
+train.mat <- model.matrix(overall ~ ., data = traind) 
+test.mat <- model.matrix(overall ~ ., data = testsd) 
+grid <- 10 ^ seq(10, -2, length = 100) 
+library(glmnet)
+fit.ridge <- glmnet(train.mat, traind$overall, alpha = 0, lambda = grid) 
+plot(fit.ridge)
+cv.ridge <- cv.glmnet(train.mat, traind$overall, alpha = 0, lambda = grid ) 
+plot(cv.ridge)
+bestlam.ridge <- cv.ridge$lambda.min
+bestlam.ridge 
+pred3 <- predict(fit.ridge, s = bestlam.ridge, newx = test.mat) 
+mean(sqrt((pred3 - testsd$overall)^2))  
+coef(cv.ridge)
+fit.lasso <- glmnet(train.mat, traind$overall, alpha = 1, lambda = grid) 
+plot(fit.lasso) 
+cv.lasso <- cv.glmnet(train.mat, traind$overall , alpha = 1, lambda = grid )
+plot(cv.lasso) 
+summary(cv.lasso)
+bestlam.lasso <- cv.lasso$lambda.min
+bestlam.lasso
+pred4 <- predict(fit.lasso, s = bestlam.lasso, newx = test.mat) 
+mean(sqrt((pred4 - testsd$overall)^2))
+#Ridge Gives a lower test error than Lasso
+coef(fit.lasso)
+#Polynomial Regression
+vall <- lm(overall~poly(age,4)+poly(weight_kg,4)+poly(eur_value,4)+poly(eur_release_clause,4)+poly(potential,4)+poly(pac,4)+poly(dri,4)+poly(phy,4)+poly(international_reputation,4)+poly(skill_moves,4)+poly(heading_accuracy,4)+poly(dribbling,4)+poly(short_passing,4)+poly(long_passing,4)+poly(balance,4)+poly(positioning,4)+poly(vision,4)+poly(agility,4)+poly(sliding_tackle,4), data = traind )
+summary(vall)
+summary(vall)
+coef(summary(vall))
+predd <- predict(vall, data = testsd)
+mean(sqrt((predd - testsd$overall)^2))
+#SVM
+library(e1071)
+vall <- svm(overall~age+weight_kg+eur_value+eur_release_clause+potential+pac+dri+phy+international_reputation+skill_moves+work_rate_att+work_rate_def+heading_accuracy+dribbling+short_passing+long_passing+balance+positioning+vision+agility+sliding_tackle, data = traind, kernel = "polynomial", degree = c(3,4,5), type = 'eps-regression')
+summary(vall)
+predd <- predict(vall, data = testsd)
+mean(sqrt((predd - testsd$overall)^2))
+#Relation between overall and age
+library(ggplot2)
+ggplot(data = FIFA_Data, aes(x=age, y = overall))+
+  geom_point(aes(x=age, y = overall),colour = "red")+
+  geom_smooth(method = 'gam', formula = y~s(x,bs = "cs"))+ggtitle('Overall Vs Age')+xlab('Age')+ylab('Overall')
+#Relationship between overall and potential
+ggplot(data = FIFA_Data, aes(x=potential, y = overall))+
+  geom_point(aes(x=potential, y = overall),colour = "red")+
+  geom_smooth(method = 'gam', formula = y~s(x,bs = "cs"))+ggtitle("Overall vs Potential")+xlab('Overall')+ylab('potential')
+#Relationship between overall and international reputation
+ggplot(data = FIFA_Data, aes(x=international_reputation, y = overall))+
+  geom_point(aes(x=international_reputation, y = overall),colour = "red")+
+  geom_smooth(method = 'lm')+ggtitle("Overall vs International Reputation")+xlab('Overall')+ylab('Reputation')
+#Relationship between release cause and overall
+ggplot(data = FIFA_Data, aes(eur_release_clause, y = overall))+
+  geom_point(aes(x=eur_release_clause, y = overall),colour = "red")+
+  geom_smooth(method = 'gam', formula = y~s(x,bs = "cs"))+ggtitle("Overall vs Release Cause")+xlab('Relsease Cause')+ylab('Overall')
+#Relationship between skill moves and overall
+ggplot(data = FIFA_Data, aes(skill_moves, y = overall))+
+  geom_point(aes(x=skill_moves, y = overall),colour = "red")+
+  geom_smooth(method = 'lm')+ggtitle("Overall vs Skill Moves")+xlab('Skill Moves')+ylab('Overall')
+#Relationship between vision and overall
+ggplot(data = FIFA_Data, aes(vision, y = overall))+
+  geom_point(aes(x=vision, y = overall),colour = "red")+
+  geom_smooth(method = 'gam', formula = y~s(x,bs = "cs"))+ggtitle("Overall Vs Vision")+xlab('Vision')+ylab('Overall')
+#1) Players with the most Overall score
+value <- rank(FIFA_Data$eur_value)
+value[1:10]
+newd <- FIFA_Data[order(-FIFA_Data$overall),]
+cjs <- head(newd[,1:20],10)
+cjs$eur_value
+cjs$name
+dfbb <- data.frame(cjs$name,cjs$overall)
+dfbb
+ggplot(data = cjs, aes(x=cjs$name, y=cjs$overall))+geom_bar(stat="identity", aes(fill=club))+ggtitle("Overall Score")+xlab('players')+ylab('Overall')
+
+#Most Valuable Goalkeepers
+abcd <- subset(FIFA_Data, FIFA_Data$gk > 1)
+abcd1 <- data.frame(abcd$name, abcd$overall)
+abcd1
+newd23 <- abcd[order(-abcd$overall),]
+goalies <- head(newd23[1:30,],5)
+af <- goalies$name[1]
+af
+data.frame(af)
+ggplot(data = goalies, aes(x=goalies$name, y=goalies$overall))+geom_bar(stat="identity", aes(fill=club))+ggtitle("Goalkeppeprs")+xlab('players')+ylab('Overall')
+VA <- c(" ________________________________________________________________ ")  
+VB <- c("|           |      |____Home Goalpost____|       |               |")
+VC <- c("|           |           Manuel Neur              |               |")
+#Most Valuable Defenders
+library(ggplot2)
+newd2 <- FIFA_Data[order(-FIFA_Data$def),]
+cjs2 <- head(newd2[,1:20],5)
+cjs2$name
+cjs2$overall
+dfbb2 <- data.frame(cjs2$name,cjs$overall)
+dfbb2
+ggplot(data = cjs2, aes(x=cjs2$name, y=cjs2$overall))+geom_bar(stat="identity", aes(fill=club))+ggtitle("Defenders")+xlab('players')+ylab('Overall')
+
+VD <- c("|           |                                    |               |")
+VE <- c("|           |____________________________________|               |")
+VF <- c("|          Hummels                          G.Chiellini          |")
+VG <- c("|                                                                |")
+#Most Valuable LB
+library(ggplot2)
+newd3 <- FIFA_Data[order(-FIFA_Data$lb),]
+cjs3 <- head(newd3[,1:20],10)
+cjs3$name
+dfbb3 <- data.frame(cjs3$name,cjs3$overall)
+dfbb3
+ggplot(data = cjs3, aes(x=cjs3$name, y=cjs3$overall))+geom_bar(stat="identity", aes(fill=club))+ggtitle("LB")+xlab('players')+ylab('Overall')
+
+VH <- c("|                                                                |")
+VI <- c("|Ramos                                                    Marcelo|")
+VZ <- c("|                                                                |")
+VJ <- c("|----------------------------O-----------------------------------|")
+#Most valuable Midfielders 
+library(ggplot2)
+newd5 <- FIFA_Data[order(-FIFA_Data$cm),]
+cjs5 <- head(newd5[,1:20],8)
+cjs5$name[1:7]
+dfbb3 <- data.frame(cjs5$name,cjs5$overall)
+dfbb3
+ggplot(data = cjs5, aes(x=cjs5$name, y=cjs5$overall))+geom_bar(stat="identity", aes(fill=club))+ggtitle("Midfielders")+xlab('players')+ylab('Overall')
+#Most valuable Defensive  Midfielders 
+library(ggplot2)
+newd6 <- FIFA_Data[order(-FIFA_Data$cdm),]
+cjs6 <- head(newd6[,1:20],3)
+cjs6
+cjs6$name[1:7]
+dfbb4 <- data.frame(cjs6$name,cjs6$overall)
+dfbb4
+ggplot(data = cjs6, aes(x=cjs6$name, y=cjs6$overall))+geom_bar(stat="identity", aes(fill=club))+xlab('players')+ylab('Overall')
+VK <- c("|                          Kante                                 |")
+VL <- c("|                                                                |")
+VM <- c("|           K.De Bruyne                  T.Kroos                 |")
+VN <- c("|                                                                |")
+#Most valuable Strikers
+newd7 <- FIFA_Data[order(-FIFA_Data$st),]
+cjs7 <- head(newd7,8)
+cjs7
+cjs7$name[1:7]
+dfbb5 <- data.frame(cjs7$name,cjs7$overall)
+dfbb5
+ggplot(data = cjs7, aes(x=cjs7$name, y=cjs7$overall))+geom_bar(stat="identity", aes(fill=club))+ggtitle("Strikers")+xlab('players')+ylab('Overall')
+VO <- c("|                          Messi                                 |")
+VP <- c("|          Saurez                         Ronaldo                |")
+VQ <- c("|             _____________________________________              |")
+VR <- c("|            |                                     |             |")
+VS <- c("|            |                                     |             |")
+VT <- c("|            |        _____________________        |             |")
+VU <- c("|____________|_______|____Away Goalpost____|_______|_____________|")
+Overall_team <- matrix(c(VA,VB,VC,VD,VE,VF,VG,VH,VI,VZ,VJ,VK,VL,VM,VN,VO,VP,VQ,VR,VS,VT,VU), ncol = 1)
+data.frame(Overall_team)
